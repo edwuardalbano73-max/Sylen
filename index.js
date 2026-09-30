@@ -38,7 +38,7 @@ const STAFF_ROLE_1 = "1422028548893311089";
 const STAFF_ROLE_2 = "1422028548893311088";
 
 // ============================================================
-// 🎨 COLORES / DECORACIÓN
+// 🎨 COLORES
 // ============================================================
 
 const COLORS = {
@@ -84,6 +84,13 @@ let db = {
 if (fs.existsSync(DATA_FILE)) {
   try {
     db = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+
+    if (!db || typeof db !== "object") {
+      db = {
+        guilds: {},
+        users: {}
+      };
+    }
 
     if (!db.guilds) db.guilds = {};
     if (!db.users) db.users = {};
@@ -132,7 +139,13 @@ function getUser(userId) {
     saveDB();
   }
 
-  return db.users[userId];
+  const user = db.users[userId];
+
+  if (typeof user.wallet !== "number") user.wallet = 0;
+  if (typeof user.bank !== "number") user.bank = 0;
+  if (typeof user.invites !== "number") user.invites = 0;
+
+  return user;
 }
 
 // ============================================================
@@ -171,7 +184,9 @@ http
     res.end("SylenMC Bot está funcionando correctamente.");
   })
   .listen(PORT, () => {
-    console.log(`🌐 Servidor HTTP iniciado en puerto ${PORT}`);
+    console.log(
+      `🌐 Servidor HTTP iniciado en puerto ${PORT}`
+    );
   });
 
 // ============================================================
@@ -187,7 +202,9 @@ function checkCooldown(userId, command, seconds) {
   const expiration = cooldowns.get(key);
 
   if (expiration && now < expiration) {
-    return Math.ceil((expiration - now) / 1000);
+    return Math.ceil(
+      (expiration - now) / 1000
+    );
   }
 
   cooldowns.set(
@@ -196,6 +213,17 @@ function checkCooldown(userId, command, seconds) {
   );
 
   return 0;
+}
+
+// ============================================================
+// 🎲 RANDOM
+// ============================================================
+
+function random(min, max) {
+  return Math.floor(
+    Math.random() *
+      (max - min + 1)
+  ) + min;
 }
 
 // ============================================================
@@ -213,9 +241,14 @@ function parseAmount(input, user) {
     return user.wallet;
   }
 
-  const amount = parseInt(input);
+  const amount = Number.parseInt(
+    input,
+    10
+  );
 
-  if (isNaN(amount)) return null;
+  if (!Number.isFinite(amount)) {
+    return null;
+  }
 
   return amount;
 }
@@ -233,6 +266,42 @@ function economyEmbed(title, description) {
     .setTimestamp();
 }
 
+function errorEmbed(title, description) {
+  return new EmbedBuilder()
+    .setColor(COLORS.error)
+    .setTitle(`❌ ${title}`)
+    .setDescription(
+      `${LINE}\n${description}\n${LINE}`
+    )
+    .setFooter({
+      text: "SylenMC"
+    })
+    .setTimestamp();
+}
+
+// ============================================================
+// 🛡️ PERMISOS
+// ============================================================
+
+function isAdmin(member) {
+  return Boolean(
+    member?.permissions?.has(
+      PermissionsBitField.Flags.Administrator
+    )
+  );
+}
+
+function isStaff(member) {
+  if (!member) return false;
+
+  if (isAdmin(member)) return true;
+
+  return Boolean(
+    member.roles?.cache?.has(STAFF_ROLE_1) ||
+    member.roles?.cache?.has(STAFF_ROLE_2)
+  );
+}
+
 // ============================================================
 // 📨 INVITACIONES
 // ============================================================
@@ -241,7 +310,8 @@ const inviteCache = new Map();
 
 async function cacheGuildInvites(guild) {
   try {
-    const invites = await guild.invites.fetch();
+    const invites =
+      await guild.invites.fetch();
 
     const data = new Map();
 
@@ -254,7 +324,10 @@ async function cacheGuildInvites(guild) {
       });
     });
 
-    inviteCache.set(guild.id, data);
+    inviteCache.set(
+      guild.id,
+      data
+    );
   } catch (error) {
     console.error(
       `⚠️ No se pudieron cargar invitaciones de ${guild.name}:`,
@@ -267,68 +340,100 @@ async function cacheGuildInvites(guild) {
 // 🟢 READY
 // ============================================================
 
-client.once("ready", async () => {
-  console.log(
-    `🤖 ${client.user.tag} está conectado correctamente.`
-  );
+client.once(
+  "clientReady",
+  async () => {
+    console.log(
+      `🤖 ${client.user.tag} está conectado correctamente.`
+    );
 
-  client.user.setActivity(
-    "SylenMC | s.help",
-    {
-      type: 3
+    client.user.setActivity(
+      "SylenMC | s.help",
+      {
+        type: 3
+      }
+    );
+
+    for (
+      const guild of client.guilds.cache.values()
+    ) {
+      await cacheGuildInvites(guild);
     }
-  );
-
-  for (const guild of client.guilds.cache.values()) {
-    await cacheGuildInvites(guild);
   }
-});
+);
 
 // ============================================================
 // ➕ INVITE CREATE
 // ============================================================
 
-client.on("inviteCreate", async invite => {
-  await cacheGuildInvites(invite.guild);
-});
+client.on(
+  "inviteCreate",
+  async invite => {
+    await cacheGuildInvites(
+      invite.guild
+    );
+  }
+);
+
+// ============================================================
+// ❌ INVITE DELETE
+// ============================================================
+
+client.on(
+  "inviteDelete",
+  async invite => {
+    await cacheGuildInvites(
+      invite.guild
+    );
+  }
+);
 
 // ============================================================
 // 👋 BIENVENIDAS + INVITACIONES
 // ============================================================
 
-client.on("guildMemberAdd", async member => {
-  const config = getGuild(member.guild.id);
+client.on(
+  "guildMemberAdd",
+  async member => {
+    const config =
+      getGuild(member.guild.id);
 
-  // ----------------------------------------------------------
-  // 👋 BIENVENIDA
-  // ----------------------------------------------------------
+    // --------------------------------------------------------
+    // 👋 BIENVENIDA
+    // --------------------------------------------------------
 
-  if (config.welcomeChannel) {
-    const channel =
-      member.guild.channels.cache.get(
-        config.welcomeChannel
-      );
+    if (config.welcomeChannel) {
+      const channel =
+        member.guild.channels.cache.get(
+          config.welcomeChannel
+        );
 
-    if (channel) {
-      const rulesDC =
-        RULES_DC_ID.startsWith("PON_")
-          ? "`#『📔』reglas┆dc`"
-          : `<#${RULES_DC_ID}>`;
+      if (
+        channel &&
+        channel.isTextBased()
+      ) {
+        const rulesDC =
+          RULES_DC_ID.startsWith("PON_")
+            ? "`#『📔』reglas┆dc`"
+            : `<#${RULES_DC_ID}>`;
 
-      const rulesMC =
-        RULES_MC_ID.startsWith("PON_")
-          ? "`#『📖』reglas┆mc`"
-          : `<#${RULES_MC_ID}>`;
+        const rulesMC =
+          RULES_MC_ID.startsWith("PON_")
+            ? "`#『📖』reglas┆mc`"
+            : `<#${RULES_MC_ID}>`;
 
-      const ticketChannel =
-        TICKET_CHANNEL_ID.startsWith("PON_")
-          ? "`#『📬』crear┆ticket`"
-          : `<#${TICKET_CHANNEL_ID}>`;
+        const ticketChannel =
+          TICKET_CHANNEL_ID.startsWith("PON_")
+            ? "`#『📬』crear┆ticket`"
+            : `<#${TICKET_CHANNEL_ID}>`;
 
-      const embed = new EmbedBuilder()
-        .setColor(COLORS.main)
-        .setTitle("👋 ¡Bienvenido a SylenMC!")
-        .setDescription(
+        const embed =
+          new EmbedBuilder()
+            .setColor(COLORS.main)
+            .setTitle(
+              "👋 ¡Bienvenido a SylenMC!"
+            )
+            .setDescription(
 `¡Hola ${member}! 🎉
 
 Eres nuestro usuario número **${member.guild.memberCount}**. 👥
@@ -353,66 +458,83 @@ Puerto: \`19016\`
 ${LINE}
 
 ¡Gracias por unirte a SylenMC! 🎉`
-        )
-        .setThumbnail(
-          member.user.displayAvatarURL({
-            dynamic: true
-          })
-        )
-        .setTimestamp();
+            )
+            .setThumbnail(
+              member.user.displayAvatarURL({
+                dynamic: true
+              })
+            )
+            .setTimestamp();
 
-      channel.send({
-        embeds: [embed]
-      }).catch(() => {});
-    }
-  }
-
-  // ----------------------------------------------------------
-  // 📨 INVITACIONES
-  // ----------------------------------------------------------
-
-  try {
-    const oldInvites =
-      inviteCache.get(member.guild.id);
-
-    const newInvites =
-      await member.guild.invites.fetch();
-
-    let usedInvite = null;
-
-    newInvites.forEach(invite => {
-      const old =
-        oldInvites?.get(invite.code);
-
-      if (
-        invite.uses &&
-        (!old || invite.uses > old.uses)
-      ) {
-        usedInvite = invite;
+        channel.send({
+          embeds: [embed]
+        }).catch(error => {
+          console.error(
+            "❌ Error enviando bienvenida:",
+            error.message
+          );
+        });
       }
-    });
+    }
 
-    await cacheGuildInvites(member.guild);
+    // --------------------------------------------------------
+    // 📨 INVITACIONES
+    // --------------------------------------------------------
 
-    if (
-      usedInvite &&
-      usedInvite.inviter
-    ) {
-      const inviter =
-        getUser(usedInvite.inviter.id);
+    try {
+      const oldInvites =
+        inviteCache.get(
+          member.guild.id
+        );
 
-      inviter.invites++;
+      const newInvites =
+        await member.guild.invites.fetch();
 
-      saveDB();
+      let usedInvite = null;
 
-      if (config.inviteChannel) {
-        const channel =
-          member.guild.channels.cache.get(
-            config.inviteChannel
+      newInvites.forEach(invite => {
+        const old =
+          oldInvites?.get(
+            invite.code
           );
 
-        if (channel) {
-          channel.send(
+        if (
+          invite.uses &&
+          (!old ||
+            invite.uses > old.uses)
+        ) {
+          usedInvite = invite;
+        }
+      });
+
+      await cacheGuildInvites(
+        member.guild
+      );
+
+      if (
+        usedInvite &&
+        usedInvite.inviter
+      ) {
+        const inviter =
+          getUser(
+            usedInvite.inviter.id
+          );
+
+        inviter.invites++;
+
+        saveDB();
+
+        if (config.inviteChannel) {
+          const channel =
+            member.guild.channels.cache.get(
+              config.inviteChannel
+            );
+
+          if (
+            channel &&
+            channel.isTextBased()
+          ) {
+            channel.send(
 `🎉 **Nueva invitación**
 
 👤 ${member} se unió a **SylenMC**.
@@ -421,49 +543,32 @@ ${LINE}
 🏆 Invitaciones: **${inviter.invites}**
 
 ${LINE}`
-          ).catch(() => {});
+            ).catch(() => {});
+          }
         }
       }
+    } catch (error) {
+      console.error(
+        "❌ Error procesando invitación:",
+        error
+      );
     }
-  } catch (error) {
-    console.error(
-      "❌ Error procesando invitación:",
-      error
-    );
   }
-});
-
-// ============================================================
-// 🛡️ ADMIN
-// ============================================================
-
-function isAdmin(member) {
-  return member?.permissions?.has(
-    PermissionsBitField.Flags.Administrator
-  );
-}
-
-// ============================================================
-// 🎲 RANDOM
-// ============================================================
-
-function random(min, max) {
-  return Math.floor(
-    Math.random() *
-      (max - min + 1)
-  ) + min;
-}
+);
 
 // ============================================================
 // 👤 USER INFO
 // ============================================================
 
 function userInfoEmbed(user) {
-  const economy = getUser(user.id);
+  const economy =
+    getUser(user.id);
 
   return new EmbedBuilder()
     .setColor(COLORS.info)
-    .setTitle("👤 Información del usuario")
+    .setTitle(
+      "👤 Información del usuario"
+    )
     .setThumbnail(
       user.displayAvatarURL({
         dynamic: true
@@ -482,17 +587,24 @@ function userInfoEmbed(user) {
       },
       {
         name: "💰 Wallet",
-        value: `$${formatMoney(economy.wallet)}`,
+        value:
+          `$${formatMoney(
+            economy.wallet
+          )}`,
         inline: true
       },
       {
         name: "🏦 Banco",
-        value: `$${formatMoney(economy.bank)}`,
+        value:
+          `$${formatMoney(
+            economy.bank
+          )}`,
         inline: true
       },
       {
         name: "📨 Invitaciones",
-        value: `${economy.invites}`,
+        value:
+          `${economy.invites}`,
         inline: true
       },
       {
@@ -560,7 +672,9 @@ function helpEmbed(category) {
   if (category === "economy") {
     return new EmbedBuilder()
       .setColor(COLORS.economy)
-      .setTitle("💰 Economía — SylenMC")
+      .setTitle(
+        "💰 Economía — SylenMC"
+      )
       .setDescription(
 `${LINE}
 
@@ -569,11 +683,11 @@ function helpEmbed(category) {
 ⏱️ Cooldown: **30 segundos**
 
 **s.slut**
-🎲 20% de probabilidad de ganar
+🎲 Juego de riesgo.
 ⏱️ Cooldown: **1 minuto**
 
 **s.crime**
-💰 15% de probabilidad de ganar
+💰 Juego de riesgo.
 ⏱️ Cooldown: **2 minutos**
 
 **s.daily**
@@ -608,7 +722,9 @@ ${LINE}`
   if (category === "info") {
     return new EmbedBuilder()
       .setColor(COLORS.info)
-      .setTitle("ℹ️ Información — SylenMC")
+      .setTitle(
+        "ℹ️ Información — SylenMC"
+      )
       .setDescription(
 `${LINE}
 
@@ -637,7 +753,9 @@ ${LINE}`
   if (category === "fun") {
     return new EmbedBuilder()
       .setColor(COLORS.main)
-      .setTitle("🎮 Diversión — SylenMC")
+      .setTitle(
+        "🎮 Diversión — SylenMC"
+      )
       .setDescription(
 `${LINE}
 
@@ -657,7 +775,9 @@ ${LINE}`
   if (category === "utility") {
     return new EmbedBuilder()
       .setColor(COLORS.info)
-      .setTitle("🛠️ Utilidades — SylenMC")
+      .setTitle(
+        "🛠️ Utilidades — SylenMC"
+      )
       .setDescription(
 `${LINE}
 
@@ -679,7 +799,9 @@ ${LINE}`
 
   return new EmbedBuilder()
     .setColor(COLORS.main)
-    .setTitle("🌌 SylenMC Bot")
+    .setTitle(
+      "🌌 SylenMC Bot"
+    )
     .setDescription(
 `${LINE}
 
@@ -723,7 +845,7 @@ function adminMenu() {
           new StringSelectMenuOptionBuilder()
             .setLabel("Tickets")
             .setDescription(
-              "Administración del sistema de tickets"
+              "Administración de tickets"
             )
             .setValue("ticket_admin")
             .setEmoji("🎫"),
@@ -744,7 +866,9 @@ function adminEmbed(category) {
   if (category === "config") {
     return new EmbedBuilder()
       .setColor(COLORS.admin)
-      .setTitle("⚙️ Configuración")
+      .setTitle(
+        "⚙️ Configuración"
+      )
       .setDescription(
 `${LINE}
 
@@ -754,9 +878,6 @@ Configura las bienvenidas.
 **s.invites #canal**
 Configura el canal de invitaciones.
 
-**s.ticket**
-Publica el panel de tickets.
-
 ${LINE}`
       );
   }
@@ -764,7 +885,9 @@ ${LINE}`
   if (category === "ticket_admin") {
     return new EmbedBuilder()
       .setColor(COLORS.ticket)
-      .setTitle("🎫 Administración de Tickets")
+      .setTitle(
+        "🎫 Administración de Tickets"
+      )
       .setDescription(
 `${LINE}
 
@@ -784,7 +907,9 @@ ${LINE}`
 
   return new EmbedBuilder()
     .setColor(COLORS.admin)
-    .setTitle("🛡️ Administración")
+    .setTitle(
+      "🛡️ Administración"
+    )
     .setDescription(
 `${LINE}
 
@@ -807,10 +932,11 @@ ${LINE}
 }
 
 // ============================================================
-// 🎫 PREGUNTAS
+// 🎫 PREGUNTAS DE TICKETS
 // ============================================================
 
 const ticketQuestions = {
+
   general: [
     "¿Cuál es tu nick de Minecraft?",
     "¿Cuál es tu problema?"
@@ -864,15 +990,44 @@ const ticketNames = {
 };
 
 // ============================================================
+// 🎫 EMOJI SEGURO PARA EL MENÚ
+// ============================================================
+
+function getTicketEmoji(
+  guild,
+  emojiId,
+  fallback
+) {
+  const emoji =
+    guild.emojis.cache.get(
+      emojiId
+    );
+
+  if (!emoji) {
+    return fallback;
+  }
+
+  return {
+    id: emoji.id,
+    name:
+      emoji.name || undefined,
+    animated: emoji.animated
+  };
+}
+
+// ============================================================
 // 🎫 PANEL DE TICKETS
 // ============================================================
 
-function ticketPanel() {
+function ticketPanel(guild) {
 
-  const embed = new EmbedBuilder()
-    .setColor(COLORS.ticket)
-    .setTitle("🎫 Centro de Soporte — SylenMC")
-    .setDescription(
+  const embed =
+    new EmbedBuilder()
+      .setColor(COLORS.ticket)
+      .setTitle(
+        "🎫 Centro de Soporte — SylenMC"
+      )
+      .setDescription(
 `¡**Hola, Somos el equipo de Soporte de SylenMC**!
 
 Si tenés una queja o duda, acá puedes crear un ticket y hablar sobre el problema con un Staff.
@@ -897,111 +1052,144 @@ Si no te atendemos, solo ten paciencia.
 Hay veces que el Staff está ocupado, pero no te preocupes, es solo cuestión de tiempo.
 
 https://skinmc.net/achievement/19/CENTRO+DE+SOPORTE/Seleccione+su+categoría`
-    )
-    .setFooter({
-      text: "SylenMC Support"
-    });
+      )
+      .setFooter({
+        text: "SylenMC Support"
+      })
+      .setTimestamp();
 
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId("ticket_select")
-    .setPlaceholder(
-      "🎫 Selecciona una categoría"
-    )
-    .addOptions(
+  const menu =
+    new StringSelectMenuBuilder()
+      .setCustomId(
+        "ticket_select"
+      )
+      .setPlaceholder(
+        "🎫 Selecciona una categoría"
+      )
+      .addOptions(
 
-      new StringSelectMenuOptionBuilder()
-        .setLabel("General")
-        .setDescription(
-          "Problemas generales"
-        )
-        .setValue("general")
-        .setEmoji({
-          name: "BLOQUE_DIAMANTE",
-          id: "1422407517056536656"
-        }),
+        new StringSelectMenuOptionBuilder()
+          .setLabel("General")
+          .setDescription(
+            "Problemas generales"
+          )
+          .setValue("general")
+          .setEmoji(
+            getTicketEmoji(
+              guild,
+              "1422407517056536656",
+              "💎"
+            )
+          ),
 
-      new StringSelectMenuOptionBuilder()
-        .setLabel("Reporte")
-        .setDescription(
-          "Reportar a un jugador"
-        )
-        .setValue("reporte")
-        .setEmoji({
-          name: "HARCORED",
-          id: "1422591052770050058"
-        }),
+        new StringSelectMenuOptionBuilder()
+          .setLabel("Reporte")
+          .setDescription(
+            "Reportar a un jugador"
+          )
+          .setValue("reporte")
+          .setEmoji(
+            getTicketEmoji(
+              guild,
+              "1422591052770050058",
+              "🛡️"
+            )
+          ),
 
-      new StringSelectMenuOptionBuilder()
-        .setLabel("Duda")
-        .setDescription(
-          "Resolver una duda"
-        )
-        .setValue("duda")
-        .setEmoji({
-          name: "interrogacion",
-          id: "1422591514327908386"
-        }),
+        new StringSelectMenuOptionBuilder()
+          .setLabel("Duda")
+          .setDescription(
+            "Resolver una duda"
+          )
+          .setValue("duda")
+          .setEmoji(
+            getTicketEmoji(
+              guild,
+              "1422591514327908386",
+              "❓"
+            )
+          ),
 
-      new StringSelectMenuOptionBuilder()
-        .setLabel("Bug")
-        .setDescription(
-          "Reportar un bug"
-        )
-        .setValue("bug")
-        .setEmoji({
-          name: "ENGRANAJE",
-          id: "1422592111819231382"
-        }),
+        new StringSelectMenuOptionBuilder()
+          .setLabel("Bug")
+          .setDescription(
+            "Reportar un bug"
+          )
+          .setValue("bug")
+          .setEmoji(
+            getTicketEmoji(
+              guild,
+              "1422592111819231382",
+              "⚙️"
+            )
+          ),
 
-      new StringSelectMenuOptionBuilder()
-        .setLabel("Alianza")
-        .setDescription(
-          "Solicitar una alianza"
-        )
-        .setValue("alianza")
-        .setEmoji({
-          name: "MINECRAFT",
-          id: "1422411326403117127"
-        }),
+        new StringSelectMenuOptionBuilder()
+          .setLabel("Alianza")
+          .setDescription(
+            "Solicitar una alianza"
+          )
+          .setValue("alianza")
+          .setEmoji(
+            getTicketEmoji(
+              guild,
+              "1422411326403117127",
+              "🎮"
+            )
+          ),
 
-      new StringSelectMenuOptionBuilder()
-        .setLabel("Tienda")
-        .setDescription(
-          "Consultas de tienda"
-        )
-        .setValue("tienda")
-        .setEmoji({
-          name: "HACHA",
-          id: "1422410643985661995"
-        }),
+        new StringSelectMenuOptionBuilder()
+          .setLabel("Tienda")
+          .setDescription(
+            "Consultas de tienda"
+          )
+          .setValue("tienda")
+          .setEmoji(
+            getTicketEmoji(
+              guild,
+              "1422410643985661995",
+              "🪓"
+            )
+          ),
 
-      new StringSelectMenuOptionBuilder()
-        .setLabel("Restablecer contraseña")
-        .setDescription(
-          "Actualizar contraseña"
-        )
-        .setValue("password")
-        .setEmoji({
-          name: "TRIDENTE",
-          id: "1422412335720435765"
-        }),
+        new StringSelectMenuOptionBuilder()
+          .setLabel(
+            "Restablecer contraseña"
+          )
+          .setDescription(
+            "Actualizar contraseña"
+          )
+          .setValue("password")
+          .setEmoji(
+            getTicketEmoji(
+              guild,
+              "1422412335720435765",
+              "🔱"
+            )
+          ),
 
-      new StringSelectMenuOptionBuilder()
-        .setLabel("Apelar sanción")
-        .setDescription(
-          "Apelar una sanción"
-        )
-        .setValue("apelacion")
-        .setEmoji({
-          name: "HACHA",
-          id: "1422410643985661995"
-        })
-    );
+        new StringSelectMenuOptionBuilder()
+          .setLabel(
+            "Apelar sanción"
+          )
+          .setDescription(
+            "Apelar una sanción"
+          )
+          .setValue("apelacion")
+          .setEmoji(
+            getTicketEmoji(
+              guild,
+              "1422410643985661995",
+              "⚖️"
+            )
+          )
+      );
 
   return {
     embeds: [embed],
     components: [
-      new ActionRowBuilder().addComponents(menu)
+      new ActionRowBuilder()
+        .addComponents(menu)
     ]
   };
 }
@@ -1015,16 +1203,82 @@ async function createTicket(
   type,
   answers
 ) {
+  let ticketChannel = null;
+
   try {
-    const guild = interaction.guild;
-    const member = interaction.member;
+
+    const guild =
+      interaction.guild;
+
+    if (!guild) {
+      return interaction.reply({
+        embeds: [
+          errorEmbed(
+            "Ticket",
+            "Este sistema solo funciona dentro de un servidor."
+          )
+        ],
+        ephemeral: true
+      });
+    }
+
+    const member =
+      interaction.member;
+
+    const botMember =
+      guild.members.me;
+
+    // --------------------------------------------------------
+    // 🤖 COMPROBAR PERMISOS DEL BOT
+    // --------------------------------------------------------
+
+    if (
+      !botMember ||
+      !botMember.permissions.has(
+        PermissionsBitField.Flags.ManageChannels
+      )
+    ) {
+      return interaction.reply({
+        embeds: [
+          errorEmbed(
+            "Sin permisos",
+            "Necesito el permiso **Administrar canales** para crear tickets."
+          )
+        ],
+        ephemeral: true
+      });
+    }
+
+    // --------------------------------------------------------
+    // 🔎 COMPROBAR TIPO
+    // --------------------------------------------------------
+
+    if (
+      !ticketQuestions[type] ||
+      !ticketNames[type]
+    ) {
+      return interaction.reply({
+        embeds: [
+          errorEmbed(
+            "Categoría inválida",
+            "La categoría del ticket no existe."
+          )
+        ],
+        ephemeral: true
+      });
+    }
+
+    // --------------------------------------------------------
+    // 🔎 COMPROBAR TICKET EXISTENTE
+    // --------------------------------------------------------
 
     const existing =
       guild.channels.cache.find(
         channel =>
-          channel.type === ChannelType.GuildText &&
+          channel.type ===
+            ChannelType.GuildText &&
           channel.topic ===
-            `ticket-owner:${member.id}`
+            `ticket-owner:${interaction.user.id}`
       );
 
     if (existing) {
@@ -1034,6 +1288,10 @@ async function createTicket(
         ephemeral: true
       });
     }
+
+    // --------------------------------------------------------
+    // 📂 BUSCAR CATEGORÍA
+    // --------------------------------------------------------
 
     let category =
       guild.channels.cache.find(
@@ -1052,77 +1310,122 @@ async function createTicket(
         });
     }
 
-    const categoryName =
-      ticketNames[type] || "ticket";
+    // --------------------------------------------------------
+    // 🏷️ NOMBRE
+    // --------------------------------------------------------
 
-    const safeUsername =
-      member.user.username
+    const categoryName =
+      ticketNames[type];
+
+    let safeUsername =
+      interaction.user.username
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "")
         .slice(0, 15);
+
+    if (!safeUsername) {
+      safeUsername = "usuario";
+    }
 
     const channelName =
       `ticket-${categoryName}-${safeUsername}`
         .slice(0, 100);
 
-    const ticketChannel =
+    // --------------------------------------------------------
+    // 🛡️ ROLES STAFF VÁLIDOS
+    // --------------------------------------------------------
+
+    const staffRoleIds = [
+      STAFF_ROLE_1,
+      STAFF_ROLE_2
+    ].filter(id =>
+      guild.roles.cache.has(id)
+    );
+
+    // --------------------------------------------------------
+    // 🔐 PERMISOS
+    // --------------------------------------------------------
+
+    const permissionOverwrites = [
+
+      {
+        id:
+          guild.roles.everyone.id,
+
+        deny: [
+          PermissionsBitField.Flags.ViewChannel
+        ]
+      },
+
+      {
+        id:
+          interaction.user.id,
+
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.AttachFiles,
+          PermissionsBitField.Flags.EmbedLinks
+        ]
+      }
+    ];
+
+    for (
+      const roleId of staffRoleIds
+    ) {
+      permissionOverwrites.push({
+        id: roleId,
+
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.AttachFiles,
+          PermissionsBitField.Flags.EmbedLinks,
+          PermissionsBitField.Flags.ManageMessages
+        ]
+      });
+    }
+
+    // --------------------------------------------------------
+    // 🆕 CREAR CANAL
+    // --------------------------------------------------------
+
+    ticketChannel =
       await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildText,
         parent: category.id,
+
         topic:
-          `ticket-owner:${member.id}`,
+          `ticket-owner:${interaction.user.id}`,
 
-        permissionOverwrites: [
-
-          {
-            id: guild.roles.everyone.id,
-            deny: [
-              PermissionsBitField.Flags.ViewChannel
-            ]
-          },
-
-          {
-            id: member.id,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages,
-              PermissionsBitField.Flags.ReadMessageHistory,
-              PermissionsBitField.Flags.AttachFiles
-            ]
-          },
-
-          {
-            id: STAFF_ROLE_1,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages,
-              PermissionsBitField.Flags.ReadMessageHistory,
-              PermissionsBitField.Flags.ManageMessages
-            ]
-          },
-
-          {
-            id: STAFF_ROLE_2,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages,
-              PermissionsBitField.Flags.ReadMessageHistory,
-              PermissionsBitField.Flags.ManageMessages
-            ]
-          }
-        ]
+        permissionOverwrites
       });
+
+    // --------------------------------------------------------
+    // 📝 PREGUNTAS
+    // --------------------------------------------------------
 
     let questionsText = "";
 
     ticketQuestions[type].forEach(
       (question, index) => {
+
+        const answer =
+          answers[index] ||
+          "Sin respuesta";
+
         questionsText +=
 `\n**${index + 1}. ${question}**
-> ${answers[index] || "Sin respuesta"}\n`;
+> ${answer}\n`;
       }
     );
+
+    // --------------------------------------------------------
+    // 🔒 BOTÓN CERRAR
+    // --------------------------------------------------------
 
     const closeButton =
       new ActionRowBuilder()
@@ -1140,16 +1443,33 @@ async function createTicket(
             )
         );
 
+    // --------------------------------------------------------
+    // 👥 MENCIONES STAFF
+    // --------------------------------------------------------
+
+    const staffMentions =
+      staffRoleIds.length > 0
+        ? staffRoleIds
+            .map(
+              id => `<@&${id}>`
+            )
+            .join(" ")
+        : "👤 Staff";
+
+    // --------------------------------------------------------
+    // 🎫 EMBED
+    // --------------------------------------------------------
+
     const embed =
       new EmbedBuilder()
         .setColor(COLORS.ticket)
         .setTitle(
-          `🎫 Ticket — ${ticketNames[type]}`
+          `🎫 Ticket — ${categoryName}`
         )
         .setDescription(
-`${member}
+`${interaction.user}
 
-<@&${STAFF_ROLE_1}> <@&${STAFF_ROLE_2}>
+${staffMentions}
 
 ${EMOJIS.loro} Gracias por abrir un ticket y comunicarte con el equipo de soporte de **SylenMC**.
 
@@ -1163,34 +1483,169 @@ ${EMOJIS.reloj} Espera pacientemente a un Staff.
 
 ${LINE}`
         )
+        .setFooter({
+          text: "SylenMC Support"
+        })
         .setTimestamp();
+
+    // --------------------------------------------------------
+    // 📩 ENVIAR TICKET
+    // --------------------------------------------------------
 
     await ticketChannel.send({
       embeds: [embed],
-      components: [closeButton]
+      components: [closeButton],
+
+      allowedMentions: {
+        users: [
+          interaction.user.id
+        ],
+        roles: staffRoleIds
+      }
     });
 
-    return interaction.reply({
-      content:
-        `✅ Tu ticket fue creado correctamente: ${ticketChannel}`,
+    // --------------------------------------------------------
+    // ✅ RESPUESTA
+    // --------------------------------------------------------
+
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(COLORS.success)
+          .setTitle(
+            "🎫 Ticket creado"
+          )
+          .setDescription(
+            `Tu ticket fue creado correctamente.\n\n${ticketChannel}`
+          )
+          .setFooter({
+            text: "SylenMC Support"
+          })
+      ],
       ephemeral: true
     });
 
   } catch (error) {
 
     console.error(
-      "❌ Error creando ticket:",
-      error
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     );
 
-    if (!interaction.replied) {
-      return interaction.reply({
-        content:
-          "❌ No pude crear el ticket. Revisa los permisos del bot.",
+    console.error(
+      "❌ ERROR CREANDO TICKET"
+    );
+
+    console.error(
+      "Código:",
+      error?.code
+    );
+
+    console.error(
+      "Mensaje:",
+      error?.message
+    );
+
+    console.error(
+      "Errores:",
+      error?.errors
+    );
+
+    console.error(
+      error?.stack
+    );
+
+    console.error(
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    );
+
+    if (ticketChannel) {
+      await ticketChannel
+        .delete()
+        .catch(() => {});
+    }
+
+    if (
+      !interaction.replied &&
+      !interaction.deferred
+    ) {
+      await interaction.reply({
+        embeds: [
+          errorEmbed(
+            "No pude crear el ticket",
+            "Discord rechazó la creación del ticket. Revisa la consola de Render para ver el error exacto."
+          )
+        ],
         ephemeral: true
-      });
+      }).catch(() => {});
     }
   }
+}
+
+// ============================================================
+// 🃏 BLACKJACK
+// ============================================================
+
+const blackjackGames = new Map();
+
+function blackjackButtons(gameId) {
+  return new ActionRowBuilder()
+    .addComponents(
+
+      new ButtonBuilder()
+        .setCustomId(
+          `bj_hit:${gameId}`
+        )
+        .setLabel("Pedir")
+        .setEmoji("🃏")
+        .setStyle(
+          ButtonStyle.Primary
+        ),
+
+      new ButtonBuilder()
+        .setCustomId(
+          `bj_stand:${gameId}`
+        )
+        .setLabel("Plantarse")
+        .setEmoji("✋")
+        .setStyle(
+          ButtonStyle.Success
+        )
+    );
+}
+
+function blackjackEmbed(
+  game,
+  revealDealer = false
+) {
+  return new EmbedBuilder()
+    .setColor(COLORS.economy)
+    .setTitle(
+      "🃏 Blackjack — SylenMC"
+    )
+    .setDescription(
+`${LINE}
+
+👤 **Jugador:** <@${game.userId}>
+
+🃏 Tu puntuación:
+**${game.player}**
+
+🤖 Puntuación del dealer:
+**${
+  revealDealer
+    ? game.dealer
+    : "🔒 Oculta"
+}**
+
+💰 Apuesta:
+**$${formatMoney(game.amount)}**
+
+${LINE}`
+    )
+    .setFooter({
+      text: "SylenMC Economy"
+    })
+    .setTimestamp();
 }
 
 // ============================================================
@@ -1201,610 +1656,796 @@ client.on(
   "messageCreate",
   async message => {
 
-    if (message.author.bot) return;
-    if (!message.guild) return;
+    try {
 
-    if (
-      !message.content
-        .toLowerCase()
-        .startsWith(PREFIX)
-    ) {
-      return;
-    }
+      if (message.author.bot) return;
+      if (!message.guild) return;
 
-    const args =
-      message.content
-        .slice(PREFIX.length)
-        .trim()
-        .split(/\s+/);
+      const content =
+        message.content || "";
 
-    const command =
-      args.shift()?.toLowerCase();
-
-    if (!command) return;
-
-    const user =
-      getUser(message.author.id);
-
-    const guildConfig =
-      getGuild(message.guild.id);
-
-    // ========================================================
-    // 📚 HELP
-    // ========================================================
-
-    if (command === "help") {
-      return message.channel.send({
-        embeds: [
-          helpEmbed("main")
-        ],
-        components: [
-          helpMenu()
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🛡️ ADMIN
-    // ========================================================
-
-    if (command === "admin") {
-
-      if (!isAdmin(message.member)) {
-        return message.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(COLORS.error)
-              .setDescription(
-                "❌ Solo los usuarios con **Administrador** pueden utilizar `s.admin`."
-              )
-          ]
-        });
-      }
-
-      return message.channel.send({
-        embeds: [
-          adminEmbed("main")
-        ],
-        components: [
-          adminMenu()
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🎫 TICKET
-    // ========================================================
-
-    if (command === "ticket") {
-
-      try {
-
-        const panel =
-          ticketPanel();
-
-        return message.channel.send({
-          embeds: panel.embeds,
-          components: panel.components
-        });
-
-      } catch (error) {
-
-        console.error(
-          "❌ Error en s.ticket:",
-          error
-        );
-
-        return message.reply(
-          "❌ No pude enviar el panel de tickets."
-        );
-      }
-    }
-
-    // ========================================================
-    // 📢 SAY — SOLO ADMIN
-    // ========================================================
-
-    if (command === "say") {
-
-      if (!isAdmin(message.member)) {
-        return message.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(COLORS.error)
-              .setDescription(
-                "❌ Necesitas tener **Administrador** para usar `s.say`."
-              )
-          ]
-        });
-      }
-
-      const text =
-        args.join(" ").trim();
-
-      if (!text) {
-        return message.reply(
-          "❌ Uso correcto: `s.say <mensaje>`"
-        );
-      }
-
-      try {
-
-        await message.delete()
-          .catch(() => {});
-
-        return message.channel.send({
-          content: text,
-          allowedMentions: {
-            parse: []
-          }
-        });
-
-      } catch (error) {
-
-        console.error(
-          "❌ Error en s.say:",
-          error
-        );
-
+      if (
+        !content
+          .toLowerCase()
+          .startsWith(PREFIX)
+      ) {
         return;
       }
-    }
 
-    // ========================================================
-    // 👋 BIENVENIDAS — ADMIN
-    // ========================================================
+      const args =
+        content
+          .slice(PREFIX.length)
+          .trim()
+          .split(/\s+/);
 
-    if (command === "bienvenidas") {
+      const command =
+        args.shift()?.toLowerCase();
 
-      if (!isAdmin(message.member)) {
-        return message.reply(
-          "❌ Necesitas tener **Administrador**."
+      if (!command) return;
+
+      const user =
+        getUser(
+          message.author.id
         );
+
+      const guildConfig =
+        getGuild(
+          message.guild.id
+        );
+
+      // ======================================================
+      // 📚 HELP
+      // ======================================================
+
+      if (command === "help") {
+        return message.channel.send({
+          embeds: [
+            helpEmbed("main")
+          ],
+          components: [
+            helpMenu()
+          ]
+        });
       }
 
-      const channel =
-        message.mentions.channels.first();
+      // ======================================================
+      // 🛡️ ADMIN
+      // ======================================================
 
-      if (!channel) {
-        return message.reply(
-          "❌ Uso correcto: `s.bienvenidas #canal`"
-        );
-      }
+      if (command === "admin") {
 
-      guildConfig.welcomeChannel =
-        channel.id;
-
-      saveDB();
-
-      return message.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(COLORS.success)
-            .setTitle("👋 Bienvenidas configuradas")
-            .setDescription(
-              `Las bienvenidas se enviarán en ${channel}.`
-            )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 📨 INVITES — ADMIN
-    // ========================================================
-
-    if (command === "invites") {
-
-      if (!isAdmin(message.member)) {
-        return message.reply(
-          "❌ Necesitas tener **Administrador**."
-        );
-      }
-
-      const channel =
-        message.mentions.channels.first();
-
-      if (!channel) {
-        return message.reply(
-          "❌ Uso correcto: `s.invites #canal`"
-        );
-      }
-
-      guildConfig.inviteChannel =
-        channel.id;
-
-      saveDB();
-
-      return message.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(COLORS.success)
-            .setTitle("📨 Invitaciones configuradas")
-            .setDescription(
-              `Los mensajes de invitación se enviarán en ${channel}.`
-            )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 💰 BALANCE
-    // ========================================================
-
-    if (
-      command === "balance" ||
-      command === "bal"
-    ) {
-
-      return message.reply({
-        embeds: [
-          economyEmbed(
-            "Tu economía",
-`👤 Usuario: ${message.author}
-
-💵 Wallet:
-**$${formatMoney(user.wallet)}**
-
-🏦 Banco:
-**$${formatMoney(user.bank)}**
-
-💳 Total:
-**$${formatMoney(
-  user.wallet + user.bank
-)}**`
+        if (
+          !isAdmin(
+            message.member
           )
-        ]
-      });
-    }
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Sin permisos",
+                "Solo los usuarios con **Administrador** pueden utilizar `s.admin`."
+              )
+            ]
+          });
+        }
 
-    // ========================================================
-    // 💼 WORK
-    // ========================================================
+        return message.channel.send({
+          embeds: [
+            adminEmbed("main")
+          ],
+          components: [
+            adminMenu()
+          ]
+        });
+      }
 
-    if (command === "work") {
+      // ======================================================
+      // 🎫 TICKET
+      // ======================================================
 
-      const remaining =
-        checkCooldown(
-          message.author.id,
-          "work",
-          30
+      if (command === "ticket") {
+
+        console.log(
+          `🎫 s.ticket ejecutado por ${message.author.tag}`
         );
 
-      if (remaining) {
+        if (
+          !isAdmin(
+            message.member
+          )
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Sin permisos",
+                "Necesitas tener **Administrador** para publicar el panel de tickets."
+              )
+            ]
+          });
+        }
+
+        try {
+
+          const panel =
+            ticketPanel(
+              message.guild
+            );
+
+          await message.channel.send(
+            panel
+          );
+
+          console.log(
+            `✅ Panel de tickets enviado en #${message.channel.name}`
+          );
+
+          return;
+
+        } catch (error) {
+
+          console.error(
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          );
+
+          console.error(
+            "❌ ERROR EN s.ticket"
+          );
+
+          console.error(
+            "Código:",
+            error?.code
+          );
+
+          console.error(
+            "Mensaje:",
+            error?.message
+          );
+
+          console.error(
+            "Errores:",
+            error?.errors
+          );
+
+          console.error(
+            error?.stack
+          );
+
+          console.error(
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          );
+
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Error al enviar el panel",
+                "Discord rechazó el panel de tickets. Revisa la consola de Render."
+              )
+            ]
+          }).catch(() => {});
+        }
+      }
+
+      // ======================================================
+      // 📢 SAY
+      // ======================================================
+
+      if (command === "say") {
+
+        if (
+          !isAdmin(
+            message.member
+          )
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Sin permisos",
+                "Necesitas tener **Administrador** para usar `s.say`."
+              )
+            ]
+          });
+        }
+
+        const text =
+          args.join(" ").trim();
+
+        if (!text) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Uso incorrecto",
+                "Usa `s.say <mensaje>`."
+              )
+            ]
+          });
+        }
+
+        try {
+
+          await message.delete()
+            .catch(() => {});
+
+          return message.channel.send({
+            content: text,
+
+            allowedMentions: {
+              parse: []
+            }
+          });
+
+        } catch (error) {
+
+          console.error(
+            "❌ Error en s.say:",
+            error
+          );
+
+          return;
+        }
+      }
+
+      // ======================================================
+      // 👋 BIENVENIDAS
+      // ======================================================
+
+      if (command === "bienvenidas") {
+
+        if (
+          !isAdmin(
+            message.member
+          )
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Sin permisos",
+                "Necesitas tener **Administrador**."
+              )
+            ]
+          });
+        }
+
+        const channel =
+          message.mentions.channels.first();
+
+        if (!channel) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Uso incorrecto",
+                "Usa `s.bienvenidas #canal`."
+              )
+            ]
+          });
+        }
+
+        if (
+          !channel.isTextBased()
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Canal inválido",
+                "Selecciona un canal de texto."
+              )
+            ]
+          });
+        }
+
+        guildConfig.welcomeChannel =
+          channel.id;
+
+        saveDB();
+
+        return message.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(
+                COLORS.success
+              )
+              .setTitle(
+                "👋 Bienvenidas configuradas"
+              )
+              .setDescription(
+                `Las bienvenidas se enviarán en ${channel}.`
+              )
+              .setFooter({
+                text: "SylenMC"
+              })
+          ]
+        });
+      }
+
+      // ======================================================
+      // 📨 INVITES
+      // ======================================================
+
+      if (command === "invites") {
+
+        if (
+          !isAdmin(
+            message.member
+          )
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Sin permisos",
+                "Necesitas tener **Administrador**."
+              )
+            ]
+          });
+        }
+
+        const channel =
+          message.mentions.channels.first();
+
+        if (!channel) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Uso incorrecto",
+                "Usa `s.invites #canal`."
+              )
+            ]
+          });
+        }
+
+        if (
+          !channel.isTextBased()
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Canal inválido",
+                "Selecciona un canal de texto."
+              )
+            ]
+          });
+        }
+
+        guildConfig.inviteChannel =
+          channel.id;
+
+        saveDB();
+
+        return message.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(
+                COLORS.success
+              )
+              .setTitle(
+                "📨 Invitaciones configuradas"
+              )
+              .setDescription(
+                `Los mensajes de invitaciones se enviarán en ${channel}.`
+              )
+              .setFooter({
+                text: "SylenMC"
+              })
+          ]
+        });
+      }
+
+      // ======================================================
+      // 💰 BALANCE
+      // ======================================================
+
+      if (
+        command === "balance" ||
+        command === "bal"
+      ) {
+
         return message.reply({
           embeds: [
             economyEmbed(
-              "⏳ Trabajo",
-              `Debes esperar **${remaining}s** antes de volver a trabajar.`
+              "Tu economía",
+`👤 Usuario: ${message.author}
+
+💵 Wallet:
+**$${formatMoney(
+  user.wallet
+)}**
+
+🏦 Banco:
+**$${formatMoney(
+  user.bank
+)}**
+
+💳 Total:
+**$${formatMoney(
+  user.wallet +
+  user.bank
+)}**`
             )
           ]
         });
       }
 
-      const amount =
-        random(50, 100);
+      // ======================================================
+      // 💼 WORK
+      // ======================================================
 
-      user.wallet += amount;
+      if (command === "work") {
 
-      saveDB();
+        const remaining =
+          checkCooldown(
+            message.author.id,
+            "work",
+            30
+          );
 
-      return message.reply({
-        embeds: [
-          economyEmbed(
-            "💼 Trabajo completado",
+        if (remaining) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "⏳ Trabajo",
+                `Debes esperar **${remaining}s** antes de volver a trabajar.`
+              )
+            ]
+          });
+        }
+
+        const amount =
+          random(50, 100);
+
+        user.wallet += amount;
+
+        saveDB();
+
+        return message.reply({
+          embeds: [
+            economyEmbed(
+              "💼 Trabajo completado",
 `👤 ${message.author}
 
 Has trabajado y recibido:
 
-💵 **+$${formatMoney(amount)}**
+💵 **+$${formatMoney(
+  amount
+)}**
 
 💰 Wallet actual:
-**$${formatMoney(user.wallet)}**`
-          )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🎲 SLUT
-    // ========================================================
-
-    if (command === "slut") {
-
-      const remaining =
-        checkCooldown(
-          message.author.id,
-          "slut",
-          60
-        );
-
-      if (remaining) {
-        return message.reply({
-          embeds: [
-            economyEmbed(
-              "⏳ Cooldown",
-              `Espera **${remaining}s** para volver a utilizar este comando.`
+**$${formatMoney(
+  user.wallet
+)}**`
             )
           ]
         });
       }
 
-      const amount =
-        random(100, 200);
+      // ======================================================
+      // 🎲 SLUT
+      // ======================================================
 
-      if (Math.random() <= 0.20) {
+      if (command === "slut") {
 
-        user.wallet += amount;
+        const remaining =
+          checkCooldown(
+            message.author.id,
+            "slut",
+            60
+          );
 
-        saveDB();
-
-        return message.reply({
-          embeds: [
-            economyEmbed(
-              "🎉 ¡Ganaste!",
-              `Has ganado **$${formatMoney(amount)}**.
-
-💰 Wallet:
-**$${formatMoney(user.wallet)}**`
-            )
-          ]
-        });
-      }
-
-      const loss =
-        Math.min(
-          random(100, 200),
-          user.wallet
-        );
-
-      user.wallet -= loss;
-
-      saveDB();
-
-      return message.reply({
-        embeds: [
-          economyEmbed(
-            "❌ Perdiste",
-            `Has perdido **$${formatMoney(loss)}**.
-
-💰 Wallet:
-**$${formatMoney(user.wallet)}**`
-          )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🔫 CRIME
-    // ========================================================
-
-    if (command === "crime") {
-
-      const remaining =
-        checkCooldown(
-          message.author.id,
-          "crime",
-          120
-        );
-
-      if (remaining) {
-        return message.reply({
-          embeds: [
-            economyEmbed(
-              "⏳ Cooldown",
-              `Espera **${remaining}s** para volver a utilizar este comando.`
-            )
-          ]
-        });
-      }
-
-      if (Math.random() <= 0.15) {
+        if (remaining) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "⏳ Cooldown",
+                `Espera **${remaining}s** para volver a utilizar este comando.`
+              )
+            ]
+          });
+        }
 
         const amount =
-          random(200, 450);
+          random(100, 200);
 
-        user.wallet += amount;
+        if (
+          Math.random() <= 0.20
+        ) {
+
+          user.wallet += amount;
+
+          saveDB();
+
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "🎉 ¡Ganaste!",
+                `Has ganado **$${formatMoney(amount)}**.\n\n💰 Wallet: **$${formatMoney(user.wallet)}**`
+              )
+            ]
+          });
+        }
+
+        const loss =
+          Math.min(
+            random(100, 200),
+            user.wallet
+          );
+
+        user.wallet -= loss;
 
         saveDB();
 
         return message.reply({
           embeds: [
             economyEmbed(
-              "💰 ¡Crimen exitoso!",
-              `El crimen salió bien.
-
-💵 Ganaste:
-**+$${formatMoney(amount)}**`
+              "❌ Perdiste",
+              `Has perdido **$${formatMoney(loss)}**.\n\n💰 Wallet: **$${formatMoney(user.wallet)}**`
             )
           ]
         });
       }
 
-      const loss =
-        Math.min(
-          random(200, 500),
-          user.wallet
-        );
+      // ======================================================
+      // 🚨 CRIME
+      // ======================================================
 
-      user.wallet -= loss;
+      if (command === "crime") {
 
-      saveDB();
-
-      return message.reply({
-        embeds: [
-          economyEmbed(
-            "🚔 Crimen fallido",
-            `El crimen salió mal.
-
-💸 Perdiste:
-**-$${formatMoney(loss)}**`
-          )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🎁 DAILY
-    // ========================================================
-
-    if (command === "daily") {
-
-      const remaining =
-        checkCooldown(
-          message.author.id,
-          "daily",
-          86400
-        );
-
-      if (remaining) {
-
-        const hours =
-          Math.floor(
-            remaining / 3600
+        const remaining =
+          checkCooldown(
+            message.author.id,
+            "crime",
+            120
           );
 
-        const minutes =
-          Math.floor(
-            (remaining % 3600) / 60
+        if (remaining) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "⏳ Cooldown",
+                `Espera **${remaining}s** para volver a utilizar este comando.`
+              )
+            ]
+          });
+        }
+
+        if (
+          Math.random() <= 0.15
+        ) {
+
+          const amount =
+            random(200, 450);
+
+          user.wallet += amount;
+
+          saveDB();
+
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "💰 ¡Crimen exitoso!",
+                `El crimen salió bien.\n\n💵 Ganaste: **+$${formatMoney(amount)}**`
+              )
+            ]
+          });
+        }
+
+        const loss =
+          Math.min(
+            random(200, 500),
+            user.wallet
           );
+
+        user.wallet -= loss;
+
+        saveDB();
 
         return message.reply({
           embeds: [
             economyEmbed(
-              "🎁 Recompensa diaria",
-              `Ya reclamaste tu recompensa.
-
-⏳ Vuelve en:
-**${hours}h ${minutes}m**`
+              "🚔 Crimen fallido",
+              `El crimen salió mal.\n\n💸 Perdiste: **-$${formatMoney(loss)}**`
             )
           ]
         });
       }
 
-      user.wallet += 500;
+      // ======================================================
+      // 🎁 DAILY
+      // ======================================================
 
-      saveDB();
+      if (command === "daily") {
 
-      return message.reply({
-        embeds: [
-          economyEmbed(
-            "🎁 Recompensa recibida",
-            `Has recibido:
+        const remaining =
+          checkCooldown(
+            message.author.id,
+            "daily",
+            86400
+          );
+
+        if (remaining) {
+
+          const hours =
+            Math.floor(
+              remaining / 3600
+            );
+
+          const minutes =
+            Math.floor(
+              (remaining % 3600) /
+                60
+            );
+
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "🎁 Recompensa diaria",
+                `Ya reclamaste tu recompensa.\n\n⏳ Vuelve en **${hours}h ${minutes}m**.`
+              )
+            ]
+          });
+        }
+
+        user.wallet += 500;
+
+        saveDB();
+
+        return message.reply({
+          embeds: [
+            economyEmbed(
+              "🎁 Recompensa recibida",
+`Has recibido:
 
 💵 **+$500**
 
 💰 Wallet:
-**$${formatMoney(user.wallet)}**`
-          )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🏦 DEP
-    // ========================================================
-
-    if (
-      command === "dep" ||
-      command === "deposit"
-    ) {
-
-      const amount =
-        parseAmount(
-          args[0],
-          user
-        );
-
-      if (!amount || amount <= 0) {
-        return message.reply(
-          "❌ Usa `s.dep <cantidad/all>`."
-        );
-      }
-
-      if (amount > user.wallet) {
-        return message.reply({
-          embeds: [
-            economyEmbed(
-              "❌ Dinero insuficiente",
-              "No tienes suficiente dinero en tu wallet."
+**$${formatMoney(
+  user.wallet
+)}**`
             )
           ]
         });
       }
 
-      user.wallet -= amount;
-      user.bank += amount;
+      // ======================================================
+      // 🏦 DEP
+      // ======================================================
 
-      saveDB();
+      if (
+        command === "dep" ||
+        command === "deposit"
+      ) {
 
-      return message.reply({
-        embeds: [
-          economyEmbed(
-            "🏦 Depósito realizado",
+        const amount =
+          parseAmount(
+            args[0],
+            user
+          );
+
+        if (
+          !amount ||
+          amount <= 0
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Uso incorrecto",
+                "Usa `s.dep <cantidad/all>`."
+              )
+            ]
+          });
+        }
+
+        if (
+          amount > user.wallet
+        ) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "❌ Dinero insuficiente",
+                "No tienes suficiente dinero en tu wallet."
+              )
+            ]
+          });
+        }
+
+        user.wallet -= amount;
+        user.bank += amount;
+
+        saveDB();
+
+        return message.reply({
+          embeds: [
+            economyEmbed(
+              "🏦 Depósito realizado",
 `Has depositado:
 
-**$${formatMoney(amount)}**
+**$${formatMoney(
+  amount
+)}**
 
 🏦 Banco:
-**$${formatMoney(user.bank)}**`
-          )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🪙 COINFLIP
-    // ========================================================
-
-    if (command === "coinflip") {
-
-      const amount =
-        parseAmount(
-          args[0],
-          user
-        );
-
-      if (!amount || amount <= 0) {
-        return message.reply(
-          "❌ Usa `s.coinflip <cantidad>`."
-        );
-      }
-
-      if (amount > user.wallet) {
-        return message.reply(
-          "❌ No tienes suficiente dinero."
-        );
-      }
-
-      const remaining =
-        checkCooldown(
-          message.author.id,
-          "coinflip",
-          10
-        );
-
-      if (remaining) {
-        return message.reply(
-          `⏳ Espera **${remaining}s**.`
-        );
-      }
-
-      user.wallet -= amount;
-
-      if (Math.random() < 0.5) {
-
-        user.wallet += amount * 2;
-
-        return message.reply({
-          embeds: [
-            economyEmbed(
-              "🪙 Cara",
-              `🎉 Ganaste **$${formatMoney(amount)}**.`
+**$${formatMoney(
+  user.bank
+)}**`
             )
           ]
         });
+      }
 
-      } else {
+      // ======================================================
+      // 🪙 COINFLIP
+      // ======================================================
+
+      if (command === "coinflip") {
+
+        const amount =
+          parseAmount(
+            args[0],
+            user
+          );
+
+        if (
+          !amount ||
+          amount <= 0
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Uso incorrecto",
+                "Usa `s.coinflip <cantidad>`."
+              )
+            ]
+          });
+        }
+
+        if (
+          amount > user.wallet
+        ) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "❌ Dinero insuficiente",
+                "No tienes suficiente dinero."
+              )
+            ]
+          });
+        }
+
+        const remaining =
+          checkCooldown(
+            message.author.id,
+            "coinflip",
+            10
+          );
+
+        if (remaining) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "⏳ Cooldown",
+                `Espera **${remaining}s**.`
+              )
+            ]
+          });
+        }
+
+        user.wallet -= amount;
+
+        if (
+          Math.random() < 0.5
+        ) {
+
+          user.wallet +=
+            amount * 2;
+
+          saveDB();
+
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "🪙 Cara",
+                `🎉 Ganaste **$${formatMoney(amount)}**.\n\n💰 Wallet: **$${formatMoney(user.wallet)}**`
+              )
+            ]
+          });
+
+        }
 
         saveDB();
 
@@ -1812,80 +2453,229 @@ Has trabajado y recibido:
           embeds: [
             economyEmbed(
               "🪙 Cruz",
-              `❌ Perdiste **$${formatMoney(amount)}**.`
+              `❌ Perdiste **$${formatMoney(amount)}**.\n\n💰 Wallet: **$${formatMoney(user.wallet)}**`
             )
           ]
         });
       }
-    }
 
-    // ========================================================
-    // 🎲 DICE
-    // ========================================================
+      // ======================================================
+      // 🎲 DICE
+      // ======================================================
 
-    if (command === "dice") {
+      if (command === "dice") {
 
-      const amount =
-        parseAmount(
-          args[0],
-          user
-        );
+        const amount =
+          parseAmount(
+            args[0],
+            user
+          );
 
-      if (!amount || amount <= 0) {
-        return message.reply(
-          "❌ Usa `s.dice <cantidad>`."
-        );
-      }
+        if (
+          !amount ||
+          amount <= 0
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Uso incorrecto",
+                "Usa `s.dice <cantidad>`."
+              )
+            ]
+          });
+        }
 
-      if (amount > user.wallet) {
-        return message.reply(
-          "❌ No tienes suficiente dinero."
-        );
-      }
+        if (
+          amount > user.wallet
+        ) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "❌ Dinero insuficiente",
+                "No tienes suficiente dinero."
+              )
+            ]
+          });
+        }
 
-      const remaining =
-        checkCooldown(
-          message.author.id,
-          "dice",
-          10
-        );
+        const remaining =
+          checkCooldown(
+            message.author.id,
+            "dice",
+            10
+          );
 
-      if (remaining) {
-        return message.reply(
-          `⏳ Espera **${remaining}s**.`
-        );
-      }
+        if (remaining) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "⏳ Cooldown",
+                `Espera **${remaining}s**.`
+              )
+            ]
+          });
+        }
 
-      user.wallet -= amount;
+        user.wallet -= amount;
 
-      const playerRoll =
-        random(1, 6);
+        const playerRoll =
+          random(1, 6);
 
-      const botRoll =
-        random(1, 6);
+        const botRoll =
+          random(1, 6);
 
-      if (playerRoll > botRoll) {
+        if (
+          playerRoll > botRoll
+        ) {
 
-        user.wallet +=
-          amount * 2;
+          user.wallet +=
+            amount * 2;
+
+          saveDB();
+
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "🎲 ¡Ganaste!",
+`🎲 Tú: **${playerRoll}**
+🤖 Bot: **${botRoll}**
+
+🎉 Ganaste **$${formatMoney(amount)}**.`
+              )
+            ]
+          });
+        }
+
+        if (
+          playerRoll === botRoll
+        ) {
+
+          user.wallet += amount;
+
+          saveDB();
+
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "🤝 Empate",
+`🎲 Tú: **${playerRoll}**
+🤖 Bot: **${botRoll}**
+
+Recuperaste tu apuesta.`
+              )
+            ]
+          });
+        }
 
         saveDB();
 
         return message.reply({
           embeds: [
             economyEmbed(
-              "🎲 ¡Ganaste!",
+              "❌ Perdiste",
 `🎲 Tú: **${playerRoll}**
 🤖 Bot: **${botRoll}**
 
-🎉 Ganaste **$${formatMoney(amount)}**.`
+Perdiste **$${formatMoney(amount)}**.`
             )
           ]
         });
       }
 
-      if (playerRoll === botRoll) {
+      // ======================================================
+      // 🏴 ROB
+      // ======================================================
 
+      if (command === "rob") {
+
+        const target =
+          message.mentions.users.first();
+
+        if (!target) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Uso incorrecto",
+                "Usa `s.rob @usuario`."
+              )
+            ]
+          });
+        }
+
+        if (
+          target.id ===
+          message.author.id
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Robo inválido",
+                "No puedes robarte a ti mismo."
+              )
+            ]
+          });
+        }
+
+        const remaining =
+          checkCooldown(
+            message.author.id,
+            "rob",
+            300
+          );
+
+        if (remaining) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "⏳ Cooldown",
+                `Espera **${remaining}s**.`
+              )
+            ]
+          });
+        }
+
+        const targetData =
+          getUser(target.id);
+
+        if (
+          targetData.wallet <= 0
+        ) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "❌ Robo imposible",
+                "Ese usuario no tiene dinero en su wallet."
+              )
+            ]
+          });
+        }
+
+        if (
+          Math.random() > 0.30
+        ) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "🚨 Robo fallido",
+                "Intentaste robar, pero fallaste."
+              )
+            ]
+          });
+        }
+
+        const amount =
+          random(
+            1,
+            Math.max(
+              1,
+              Math.min(
+                targetData.wallet,
+                500
+              )
+            )
+          );
+
+        targetData.wallet -= amount;
         user.wallet += amount;
 
         saveDB();
@@ -1893,143 +2683,160 @@ Has trabajado y recibido:
         return message.reply({
           embeds: [
             economyEmbed(
-              "🤝 Empate",
-`🎲 Tú: **${playerRoll}**
-🤖 Bot: **${botRoll}**
-
-Recuperaste tu apuesta.`
+              "🏴 Robo exitoso",
+              `Robaste **$${formatMoney(amount)}** a ${target}.\n\n💰 Tu wallet: **$${formatMoney(user.wallet)}**`
             )
           ]
         });
       }
 
-      saveDB();
-
-      return message.reply({
-        embeds: [
-          economyEmbed(
-            "❌ Perdiste",
-`🎲 Tú: **${playerRoll}**
-🤖 Bot: **${botRoll}**
-
-Perdiste **$${formatMoney(amount)}**.`
-          )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🏴 ROB
-    // ========================================================
-
-    if (command === "rob") {
-
-      const target =
-        message.mentions.users.first();
-
-      if (!target) {
-        return message.reply(
-          "❌ Usa `s.rob @usuario`."
-        );
-      }
+      // ======================================================
+      // 🃏 BLACKJACK
+      // ======================================================
 
       if (
-        target.id ===
-        message.author.id
+        command === "bj" ||
+        command === "blackjack"
       ) {
-        return message.reply(
-          "❌ No puedes robarte a ti mismo."
+
+        const amount =
+          parseAmount(
+            args[0],
+            user
+          );
+
+        if (
+          !amount ||
+          amount <= 0
+        ) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Uso incorrecto",
+                "Usa `s.bj <cantidad/all>`."
+              )
+            ]
+          });
+        }
+
+        if (
+          amount > user.wallet
+        ) {
+          return message.reply({
+            embeds: [
+              economyEmbed(
+                "❌ Dinero insuficiente",
+                "No tienes suficiente dinero."
+              )
+            ]
+          });
+        }
+
+        for (
+          const game of blackjackGames.values()
+        ) {
+          if (
+            game.userId ===
+            message.author.id
+          ) {
+            return message.reply({
+              embeds: [
+                economyEmbed(
+                  "🃏 Partida activa",
+                  "Ya tienes una partida de Blackjack activa."
+                )
+              ]
+            });
+          }
+        }
+
+        user.wallet -= amount;
+
+        const gameId =
+          `${message.author.id}-${Date.now()}-${random(1000, 9999)}`;
+
+        const game = {
+          userId:
+            message.author.id,
+          amount,
+          player:
+            random(12, 21),
+          dealer:
+            random(15, 21)
+        };
+
+        blackjackGames.set(
+          gameId,
+          game
         );
+
+        saveDB();
+
+        try {
+
+          await message.reply({
+            embeds: [
+              blackjackEmbed(game)
+            ],
+            components: [
+              blackjackButtons(
+                gameId
+              )
+            ]
+          });
+
+        } catch (error) {
+
+          blackjackGames.delete(
+            gameId
+          );
+
+          user.wallet += amount;
+
+          saveDB();
+
+          throw error;
+        }
+
+        return;
       }
 
-      const remaining =
-        checkCooldown(
-          message.author.id,
-          "rob",
-          300
-        );
+      // ======================================================
+      // 👤 INFO USER
+      // ======================================================
 
-      if (remaining) {
-        return message.reply(
-          `⏳ Espera **${remaining}s**.`
-        );
-      }
+      if (
+        command === "infouser"
+      ) {
 
-      const targetData =
-        getUser(target.id);
+        const target =
+          message.mentions.users.first() ||
+          message.author;
 
-      if (targetData.wallet <= 0) {
-        return message.reply(
-          "❌ Ese usuario no tiene dinero en su wallet."
-        );
-      }
-
-      if (Math.random() > 0.30) {
         return message.reply({
           embeds: [
-            economyEmbed(
-              "🚨 Robo fallido",
-              "Intentaste robar, pero fallaste."
-            )
+            userInfoEmbed(target)
           ]
         });
       }
 
-      const amount =
-        random(
-          1,
-          Math.max(
-            1,
-            Math.min(
-              targetData.wallet,
-              500
+      // ======================================================
+      // 🤖 BOT INFO
+      // ======================================================
+
+      if (
+        command === "infobot"
+      ) {
+
+        const embed =
+          new EmbedBuilder()
+            .setColor(
+              COLORS.main
             )
-          )
-        );
-
-      targetData.wallet -= amount;
-      user.wallet += amount;
-
-      saveDB();
-
-      return message.reply({
-        embeds: [
-          economyEmbed(
-            "🏴 Robo exitoso",
-            `Robaste **$${formatMoney(amount)}** a ${target}.`
-          )
-        ]
-      });
-    }
-
-    // ========================================================
-    // 👤 INFO USER
-    // ========================================================
-
-    if (command === "infouser") {
-
-      const target =
-        message.mentions.users.first() ||
-        message.author;
-
-      return message.reply({
-        embeds: [
-          userInfoEmbed(target)
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🤖 BOT INFO
-    // ========================================================
-
-    if (command === "infobot") {
-
-      const embed =
-        new EmbedBuilder()
-          .setColor(COLORS.main)
-          .setTitle("🤖 SylenMC Bot")
-          .setDescription(
+            .setTitle(
+              "🤖 SylenMC Bot"
+            )
+            .setDescription(
 `${LINE}
 
 **🤖 Bot de SylenMC**
@@ -2041,113 +2848,182 @@ Perdiste **$${formatMoney(amount)}**.`
 👾 https://discord.gg/4BkKBqYyv3
 
 ${LINE}`
-          )
-          .addFields(
-            {
-              name: "🌐 Servidores",
-              value:
-                `${client.guilds.cache.size}`,
-              inline: true
-            },
-            {
-              name: "👥 Usuarios",
-              value:
-                `${client.guilds.cache.reduce(
-                  (total, guild) =>
-                    total +
-                    guild.memberCount,
-                  0
-                )}`,
-              inline: true
-            }
-          )
-          .setTimestamp();
+            )
+            .addFields(
+              {
+                name:
+                  "🌐 Servidores",
+                value:
+                  `${client.guilds.cache.size}`,
+                inline: true
+              },
+              {
+                name:
+                  "👥 Usuarios",
+                value:
+                  `${client.guilds.cache.reduce(
+                    (total, guild) =>
+                      total +
+                      guild.memberCount,
+                    0
+                  )}`,
+                inline: true
+              }
+            )
+            .setTimestamp();
 
-      return message.reply({
-        embeds: [embed]
-      });
-    }
+        return message.reply({
+          embeds: [embed]
+        });
+      }
 
-    // ========================================================
-    // 🏠 SERVER INFO
-    // ========================================================
+      // ======================================================
+      // 🏠 SERVER INFO
+      // ======================================================
 
-    if (
-      command === "infoserver" ||
-      command === "serverinfo"
-    ) {
+      if (
+        command === "infoserver" ||
+        command === "serverinfo"
+      ) {
 
-      const guild =
-        message.guild;
+        const guild =
+          message.guild;
 
-      const embed =
-        new EmbedBuilder()
-          .setColor(COLORS.info)
-          .setTitle(
-            `🏠 ${guild.name}`
-          )
-          .setThumbnail(
-            guild.iconURL({
-              dynamic: true
-            })
-          )
-          .addFields(
-            {
-              name: "👥 Miembros",
-              value:
-                `${guild.memberCount}`,
-              inline: true
-            },
-            {
-              name: "💬 Canales",
-              value:
-                `${guild.channels.cache.size}`,
-              inline: true
-            },
-            {
-              name: "🎭 Roles",
-              value:
-                `${guild.roles.cache.size}`,
-              inline: true
-            },
-            {
-              name: "🆔 ID",
-              value:
-                `\`${guild.id}\``,
-              inline: true
-            },
-            {
-              name: "📅 Creado",
-              value:
-                `<t:${Math.floor(
-                  guild.createdTimestamp /
-                    1000
-                )}:F>`,
-              inline: true
-            }
-          )
-          .setTimestamp();
+        const embed =
+          new EmbedBuilder()
+            .setColor(
+              COLORS.info
+            )
+            .setTitle(
+              `🏠 ${guild.name}`
+            )
+            .setThumbnail(
+              guild.iconURL({
+                extension: "png",
+                size: 1024
+              })
+            )
+            .addFields(
+              {
+                name:
+                  "👥 Miembros",
+                value:
+                  `${guild.memberCount}`,
+                inline: true
+              },
+              {
+                name:
+                  "💬 Canales",
+                value:
+                  `${guild.channels.cache.size}`,
+                inline: true
+              },
+              {
+                name:
+                  "🎭 Roles",
+                value:
+                  `${guild.roles.cache.size}`,
+                inline: true
+              },
+              {
+                name:
+                  "🆔 ID",
+                value:
+                  `\`${guild.id}\``,
+                inline: true
+              },
+              {
+                name:
+                  "📅 Creado",
+                value:
+                  `<t:${Math.floor(
+                    guild.createdTimestamp /
+                      1000
+                  )}:F>`,
+                inline: true
+              }
+            )
+            .setTimestamp();
 
-      return message.reply({
-        embeds: [embed]
-      });
-    }
+        return message.reply({
+          embeds: [embed]
+        });
+      }
 
-    // ========================================================
-    // 🖼️ ICON
-    // ========================================================
+      // ======================================================
+      // 🖼️ ICON
+      // ======================================================
 
-    if (
-      command === "infoicon" ||
-      command === "servericon"
-    ) {
+      if (
+        command === "infoicon" ||
+        command === "servericon"
+      ) {
 
-      return message.reply(
-        message.guild.iconURL({
-          extension: "png",
-          size: 4096
-        }) ||
-        "❌ El servidor no tiene icono."
+        const icon =
+          message.guild.iconURL({
+            extension: "png",
+            size: 4096
+          });
+
+        if (!icon) {
+          return message.reply({
+            embeds: [
+              errorEmbed(
+                "Icono",
+                "El servidor no tiene un icono."
+              )
+            ]
+          });
+        }
+
+        return message.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(
+                COLORS.info
+              )
+              .setTitle(
+                "🖼️ Icono del servidor"
+              )
+              .setImage(icon)
+              .setFooter({
+                text: "SylenMC"
+              })
+          ]
+        });
+      }
+
+    } catch (error) {
+
+      console.error(
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      );
+
+      console.error(
+        "❌ ERROR EN MESSAGE CREATE"
+      );
+
+      console.error(
+        "Código:",
+        error?.code
+      );
+
+      console.error(
+        "Mensaje:",
+        error?.message
+      );
+
+      console.error(
+        "Errores:",
+        error?.errors
+      );
+
+      console.error(
+        error?.stack
+      );
+
+      console.error(
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       );
     }
   }
@@ -2161,234 +3037,591 @@ client.on(
   "interactionCreate",
   async interaction => {
 
-    // ========================================================
-    // 📚 HELP MENU
-    // ========================================================
+    try {
 
-    if (
-      interaction.isStringSelectMenu() &&
-      interaction.customId ===
-        "help_menu"
-    ) {
-
-      return interaction.update({
-        embeds: [
-          helpEmbed(
-            interaction.values[0]
-          )
-        ],
-        components: [
-          helpMenu()
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🛡️ ADMIN MENU
-    // ========================================================
-
-    if (
-      interaction.isStringSelectMenu() &&
-      interaction.customId ===
-        "admin_menu"
-    ) {
+      // ======================================================
+      // 📚 HELP MENU
+      // ======================================================
 
       if (
-        !isAdmin(
-          interaction.member
+        interaction.isStringSelectMenu() &&
+        interaction.customId ===
+          "help_menu"
+      ) {
+
+        const category =
+          interaction.values[0];
+
+        return interaction.update({
+          embeds: [
+            helpEmbed(
+              category
+            )
+          ],
+          components: [
+            helpMenu()
+          ]
+        });
+      }
+
+      // ======================================================
+      // 🛡️ ADMIN MENU
+      // ======================================================
+
+      if (
+        interaction.isStringSelectMenu() &&
+        interaction.customId ===
+          "admin_menu"
+      ) {
+
+        if (
+          !isAdmin(
+            interaction.member
+          )
+        ) {
+          return interaction.reply({
+            content:
+              "❌ Necesitas tener **Administrador**.",
+            ephemeral: true
+          });
+        }
+
+        return interaction.update({
+          embeds: [
+            adminEmbed(
+              interaction.values[0]
+            )
+          ],
+          components: [
+            adminMenu()
+          ]
+        });
+      }
+
+      // ======================================================
+      // 🎫 TICKET SELECT
+      // ======================================================
+
+      if (
+        interaction.isStringSelectMenu() &&
+        interaction.customId ===
+          "ticket_select"
+      ) {
+
+        const type =
+          interaction.values[0];
+
+        if (
+          !ticketQuestions[type]
+        ) {
+          return interaction.reply({
+            embeds: [
+              errorEmbed(
+                "Ticket",
+                "Esta categoría de ticket no existe."
+              )
+            ],
+            ephemeral: true
+          });
+        }
+
+        const existing =
+          interaction.guild.channels.cache.find(
+            channel =>
+              channel.type ===
+                ChannelType.GuildText &&
+              channel.topic ===
+                `ticket-owner:${interaction.user.id}`
+          );
+
+        if (existing) {
+          return interaction.reply({
+            content:
+              `❌ Ya tienes un ticket abierto: ${existing}`,
+            ephemeral: true
+          });
+        }
+
+        const questions =
+          ticketQuestions[type];
+
+        const modal =
+          new ModalBuilder()
+            .setCustomId(
+              `ticket_modal_${type}`
+            )
+            .setTitle(
+              `Ticket: ${ticketNames[type]}`
+            );
+
+        questions.forEach(
+          (question, index) => {
+
+            const input =
+              new TextInputBuilder()
+                .setCustomId(
+                  `answer_${index}`
+                )
+                .setLabel(
+                  question.length > 45
+                    ? question.slice(
+                        0,
+                        42
+                      ) + "..."
+                    : question
+                )
+                .setPlaceholder(
+                  "Escribe tu respuesta..."
+                )
+                .setStyle(
+                  index === 0
+                    ? TextInputStyle.Short
+                    : TextInputStyle.Paragraph
+                )
+                .setRequired(true)
+                .setMaxLength(1000);
+
+            modal.addComponents(
+              new ActionRowBuilder()
+                .addComponents(input)
+            );
+          }
+        );
+
+        return interaction.showModal(
+          modal
+        );
+      }
+
+      // ======================================================
+      // 📝 TICKET MODAL
+      // ======================================================
+
+      if (
+        interaction.isModalSubmit() &&
+        interaction.customId.startsWith(
+          "ticket_modal_"
         )
       ) {
-        return interaction.reply({
-          content:
-            "❌ Necesitas tener **Administrador**.",
-          ephemeral: true
-        });
-      }
 
-      return interaction.update({
-        embeds: [
-          adminEmbed(
-            interaction.values[0]
-          )
-        ],
-        components: [
-          adminMenu()
-        ]
-      });
-    }
-
-    // ========================================================
-    // 🎫 TICKET SELECT
-    // ========================================================
-
-    if (
-      interaction.isStringSelectMenu() &&
-      interaction.customId ===
-        "ticket_select"
-    ) {
-
-      const type =
-        interaction.values[0];
-
-      const existing =
-        interaction.guild.channels.cache.find(
-          channel =>
-            channel.type ===
-              ChannelType.GuildText &&
-            channel.topic ===
-              `ticket-owner:${interaction.user.id}`
-        );
-
-      if (existing) {
-        return interaction.reply({
-          content:
-            `❌ Ya tienes un ticket abierto: ${existing}`,
-          ephemeral: true
-        });
-      }
-
-      const questions =
-        ticketQuestions[type];
-
-      const modal =
-        new ModalBuilder()
-          .setCustomId(
-            `ticket_modal_${type}`
-          )
-          .setTitle(
-            `Ticket: ${ticketNames[type]}`
+        const type =
+          interaction.customId.replace(
+            "ticket_modal_",
+            ""
           );
 
-      questions.forEach(
-        (question, index) => {
+        if (
+          !ticketQuestions[type]
+        ) {
+          return interaction.reply({
+            embeds: [
+              errorEmbed(
+                "Ticket",
+                "La categoría de este ticket ya no existe."
+              )
+            ],
+            ephemeral: true
+          });
+        }
 
-          const input =
-            new TextInputBuilder()
-              .setCustomId(
+        const answers = [];
+
+        ticketQuestions[type].forEach(
+          (_, index) => {
+
+            answers.push(
+              interaction.fields.getTextInputValue(
                 `answer_${index}`
               )
-              .setLabel(
-                question.length > 45
-                  ? question.slice(
-                      0,
-                      42
-                    ) + "..."
-                  : question
-              )
-              .setPlaceholder(
-                "Escribe tu respuesta..."
-              )
-              .setStyle(
-                index === 0
-                  ? TextInputStyle.Short
-                  : TextInputStyle.Paragraph
-              )
-              .setRequired(true)
-              .setMaxLength(1000);
-
-          modal.addComponents(
-            new ActionRowBuilder()
-              .addComponents(input)
-          );
-        }
-      );
-
-      return interaction.showModal(
-        modal
-      );
-    }
-
-    // ========================================================
-    // 📝 TICKET MODAL
-    // ========================================================
-
-    if (
-      interaction.isModalSubmit() &&
-      interaction.customId.startsWith(
-        "ticket_modal_"
-      )
-    ) {
-
-      const type =
-        interaction.customId.replace(
-          "ticket_modal_",
-          ""
+            );
+          }
         );
 
-      const answers = [];
-
-      ticketQuestions[type].forEach(
-        (_, index) => {
-
-          answers.push(
-            interaction.fields.getTextInputValue(
-              `answer_${index}`
-            )
-          );
-        }
-      );
-
-      return createTicket(
-        interaction,
-        type,
-        answers
-      );
-    }
-
-    // ========================================================
-    // 🔒 CLOSE TICKET
-    // ========================================================
-
-    if (
-      interaction.isButton() &&
-      interaction.customId ===
-        "ticket_close"
-    ) {
-
-      const staff =
-        isAdmin(
-          interaction.member
-        ) ||
-        interaction.member.roles.cache.has(
-          STAFF_ROLE_1
-        ) ||
-        interaction.member.roles.cache.has(
-          STAFF_ROLE_2
+        return createTicket(
+          interaction,
+          type,
+          answers
         );
+      }
 
-      if (!staff) {
-        return interaction.reply({
+      // ======================================================
+      // 🔒 CLOSE TICKET
+      // ======================================================
+
+      if (
+        interaction.isButton() &&
+        interaction.customId ===
+          "ticket_close"
+      ) {
+
+        if (
+          !isStaff(
+            interaction.member
+          )
+        ) {
+          return interaction.reply({
+            content:
+              "❌ Solo un Staff puede cerrar este ticket.",
+            ephemeral: true
+          });
+        }
+
+        await interaction.reply({
           content:
-            "❌ Solo un Staff puede cerrar este ticket.",
-          ephemeral: true
+            "🔒 Cerrando ticket..."
+        });
+
+        setTimeout(() => {
+
+          if (
+            interaction.channel
+          ) {
+            interaction.channel
+              .delete()
+              .catch(error => {
+                console.error(
+                  "❌ Error cerrando ticket:",
+                  error
+                );
+              });
+          }
+
+        }, 1500);
+
+        return;
+      }
+
+      // ======================================================
+      // 🃏 BLACKJACK HIT
+      // ======================================================
+
+      if (
+        interaction.isButton() &&
+        interaction.customId.startsWith(
+          "bj_hit:"
+        )
+      ) {
+
+        const gameId =
+          interaction.customId.slice(
+            "bj_hit:".length
+          );
+
+        const game =
+          blackjackGames.get(
+            gameId
+          );
+
+        if (!game) {
+          return interaction.reply({
+            content:
+              "❌ Esta partida ya terminó o expiró.",
+            ephemeral: true
+          });
+        }
+
+        if (
+          game.userId !==
+          interaction.user.id
+        ) {
+          return interaction.reply({
+            content:
+              "❌ Esta partida no es tuya.",
+            ephemeral: true
+          });
+        }
+
+        game.player +=
+          random(1, 11);
+
+        if (
+          game.player > 21
+        ) {
+
+          blackjackGames.delete(
+            gameId
+          );
+
+          return interaction.update({
+            embeds: [
+              new EmbedBuilder()
+                .setColor(
+                  COLORS.error
+                )
+                .setTitle(
+                  "🃏 Blackjack — Perdiste"
+                )
+                .setDescription(
+`${LINE}
+
+💥 Te pasaste de **21**.
+
+🃏 Tu puntuación:
+**${game.player}**
+
+💰 Perdiste:
+**$${formatMoney(
+  game.amount
+)}**
+
+${LINE}`
+                )
+                .setFooter({
+                  text:
+                    "SylenMC Economy"
+                })
+                .setTimestamp()
+            ],
+            components: []
+          });
+        }
+
+        return interaction.update({
+          embeds: [
+            blackjackEmbed(
+              game
+            )
+          ],
+          components: [
+            blackjackButtons(
+              gameId
+            )
+          ]
         });
       }
 
-      await interaction.reply(
-        "🔒 Cerrando ticket..."
+      // ======================================================
+      // 🃏 BLACKJACK STAND
+      // ======================================================
+
+      if (
+        interaction.isButton() &&
+        interaction.customId.startsWith(
+          "bj_stand:"
+        )
+      ) {
+
+        const gameId =
+          interaction.customId.slice(
+            "bj_stand:".length
+          );
+
+        const game =
+          blackjackGames.get(
+            gameId
+          );
+
+        if (!game) {
+          return interaction.reply({
+            content:
+              "❌ Esta partida ya terminó o expiró.",
+            ephemeral: true
+          });
+        }
+
+        if (
+          game.userId !==
+          interaction.user.id
+        ) {
+          return interaction.reply({
+            content:
+              "❌ Esta partida no es tuya.",
+            ephemeral: true
+          });
+        }
+
+        blackjackGames.delete(
+          gameId
+        );
+
+        const user =
+          getUser(
+            interaction.user.id
+          );
+
+        let title;
+        let description;
+
+        if (
+          game.player >
+          game.dealer
+        ) {
+
+          user.wallet +=
+            game.amount * 2;
+
+          title =
+            "🃏 ¡Ganaste!";
+
+          description =
+`Tu puntuación:
+**${game.player}**
+
+Dealer:
+**${game.dealer}**
+
+💰 Ganaste:
+**$${formatMoney(
+  game.amount
+)}**`;
+
+        } else if (
+          game.player ===
+          game.dealer
+        ) {
+
+          user.wallet +=
+            game.amount;
+
+          title =
+            "🃏 Empate";
+
+          description =
+`Tu puntuación:
+**${game.player}**
+
+Dealer:
+**${game.dealer}**
+
+🤝 Recuperaste tu apuesta.`;
+
+        } else {
+
+          title =
+            "🃏 Perdiste";
+
+          description =
+`Tu puntuación:
+**${game.player}**
+
+Dealer:
+**${game.dealer}**
+
+❌ Perdiste:
+**$${formatMoney(
+  game.amount
+)}**`;
+        }
+
+        saveDB();
+
+        return interaction.update({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(
+                title.includes("Ganaste")
+                  ? COLORS.success
+                  : title.includes("Empate")
+                    ? COLORS.info
+                    : COLORS.error
+              )
+              .setTitle(
+                title
+              )
+              .setDescription(
+`${LINE}
+
+${description}
+
+${LINE}`
+              )
+              .setFooter({
+                text:
+                  "SylenMC Economy"
+              })
+              .setTimestamp()
+          ],
+          components: []
+        });
+      }
+
+    } catch (error) {
+
+      console.error(
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       );
 
-      setTimeout(() => {
-        interaction.channel
-          .delete()
-          .catch(() => {});
-      }, 1500);
+      console.error(
+        "❌ ERROR EN INTERACTION CREATE"
+      );
 
-      return;
+      console.error(
+        "Código:",
+        error?.code
+      );
+
+      console.error(
+        "Mensaje:",
+        error?.message
+      );
+
+      console.error(
+        "Errores:",
+        error?.errors
+      );
+
+      console.error(
+        error?.stack
+      );
+
+      console.error(
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      );
+
+      if (
+        !interaction.replied &&
+        !interaction.deferred
+      ) {
+        await interaction.reply({
+          embeds: [
+            errorEmbed(
+              "Error",
+              "Ocurrió un error procesando esta interacción."
+            )
+          ],
+          ephemeral: true
+        }).catch(() => {});
+      }
     }
   }
 );
 
 // ============================================================
-// 🚨 ERRORES
+// 🚨 ERRORES GLOBALES
 // ============================================================
 
 process.on(
   "unhandledRejection",
   error => {
     console.error(
-      "❌ Unhandled Rejection:",
-      error
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    );
+
+    console.error(
+      "❌ UNHANDLED REJECTION"
+    );
+
+    console.error(
+      "Código:",
+      error?.code
+    );
+
+    console.error(
+      "Mensaje:",
+      error?.message
+    );
+
+    console.error(
+      "Errores:",
+      error?.errors
+    );
+
+    console.error(
+      error?.stack
+    );
+
+    console.error(
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     );
   }
 );
@@ -2397,8 +3630,34 @@ process.on(
   "uncaughtException",
   error => {
     console.error(
-      "❌ Uncaught Exception:",
-      error
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    );
+
+    console.error(
+      "❌ UNCAUGHT EXCEPTION"
+    );
+
+    console.error(
+      "Código:",
+      error?.code
+    );
+
+    console.error(
+      "Mensaje:",
+      error?.message
+    );
+
+    console.error(
+      "Errores:",
+      error?.errors
+    );
+
+    console.error(
+      error?.stack
+    );
+
+    console.error(
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     );
   }
 );
@@ -2424,8 +3683,12 @@ client
     );
   })
   .catch(error => {
+
     console.error(
-      "❌ Error iniciando sesión:",
+      "❌ Error iniciando sesión:"
+    );
+
+    console.error(
       error
     );
   });
